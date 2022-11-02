@@ -378,8 +378,8 @@ public class RaftJournalSystem extends AbstractJournalSystem {
     // snapshot interval
     RaftServerConfigKeys.Snapshot.setAutoTriggerEnabled(
         properties, true);
-    int snapshotAutoTriggerThreshold =
-        Configuration.getInt(PropertyKey.MASTER_JOURNAL_CHECKPOINT_PERIOD_ENTRIES);
+    long snapshotAutoTriggerThreshold =
+        Configuration.getLong(PropertyKey.MASTER_JOURNAL_CHECKPOINT_PERIOD_ENTRIES);
     RaftServerConfigKeys.Snapshot.setAutoTriggerThreshold(properties,
         snapshotAutoTriggerThreshold);
     // minimum distance between two snapshots in number of log entries
@@ -453,7 +453,7 @@ public class RaftJournalSystem extends AbstractJournalSystem {
       Preconditions.checkState(groupIter.hasNext(), "no group info found");
       RaftGroup group = groupIter.next();
       Preconditions.checkState(group.getGroupId() == RAFT_GROUP_ID,
-          String.format("Invalid group id %s, expecting %s", group.getGroupId(), RAFT_GROUP_ID));
+          "Invalid group id %s, expecting %s", group.getGroupId(), RAFT_GROUP_ID);
       return group;
     } catch (IOException | IllegalStateException e) {
       LogUtils.warnWithException(LOG, "Failed to get raft group, falling back to initial group", e);
