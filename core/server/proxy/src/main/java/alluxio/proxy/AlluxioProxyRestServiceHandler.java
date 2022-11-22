@@ -49,7 +49,7 @@ public final class AlluxioProxyRestServiceHandler {
   // queries
   public static final String QUERY_RAW_CONFIGURATION = "raw_configuration";
 
-  private final ProxyProcess mProxyProcess;
+//  private final ProxyProcess mProxyProcess;
 
   /**
    * Constructs a new {@link AlluxioProxyRestServiceHandler}.
@@ -58,8 +58,8 @@ public final class AlluxioProxyRestServiceHandler {
    */
   public AlluxioProxyRestServiceHandler(@Context ServletContext context) {
     // Poor man's dependency injection through the Jersey application scope.
-    mProxyProcess = (ProxyProcess) context
-        .getAttribute(ProxyWebServer.ALLUXIO_PROXY_SERVLET_RESOURCE_KEY);
+//    mProxyProcess = (ProxyProcess) context
+//        .getAttribute(ProxyWebServer.ALLUXIO_PROXY_SERVLET_RESOURCE_KEY);
   }
 
   /**
@@ -82,8 +82,8 @@ public final class AlluxioProxyRestServiceHandler {
       }
       return new AlluxioProxyInfo()
           .setConfiguration(getConfigurationInternal(rawConfig))
-          .setStartTimeMs(mProxyProcess.getStartTimeMs())
-          .setUptimeMs(mProxyProcess.getUptimeMs())
+//          .setStartTimeMs(mProxyProcess.getStartTimeMs())
+//          .setUptimeMs(mProxyProcess.getUptimeMs())
           .setVersion(RuntimeConstants.VERSION);
     }, Configuration.global());
   }

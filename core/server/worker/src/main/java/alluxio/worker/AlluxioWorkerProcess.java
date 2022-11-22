@@ -26,6 +26,7 @@ import alluxio.util.io.PathUtils;
 import alluxio.util.network.NettyUtils;
 import alluxio.util.network.NetworkAddressUtils;
 import alluxio.util.network.NetworkAddressUtils.ServiceType;
+import alluxio.web.ProxyWebServer;
 import alluxio.web.WebServer;
 import alluxio.web.WorkerWebServer;
 import alluxio.wire.TieredIdentity;
@@ -67,6 +68,9 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
 
   /** Worker Web UI server. */
   private final WebServer mWebServer;
+
+  /** The web server. */
+  private WebServer mProxyWebServer = null;
 
   /** Used for auto binding. **/
   private ServerSocket mBindSocket;
@@ -222,6 +226,14 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
 
     // Start serving the web server, this will not block.
     mWebServer.start();
+
+    mProxyWebServer = new ProxyWebServer(ServiceType.PROXY_WEB.getServiceName(),
+        NetworkAddressUtils.getBindAddress(ServiceType.PROXY_WEB, Configuration.global()),
+        null);
+    // reset proxy web port
+    Configuration.set(PropertyKey.PROXY_WEB_PORT,
+        mProxyWebServer.getLocalPort());
+    mProxyWebServer.start();
 
     // Start monitor jvm
     if (Configuration.getBoolean(PropertyKey.WORKER_JVM_MONITOR_ENABLED)) {

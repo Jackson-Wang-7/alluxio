@@ -76,13 +76,13 @@ public final class AlluxioProxyProcess implements ProxyProcess {
 
   @Override
   public void start() throws Exception {
-    mWebServer = new ProxyWebServer(ServiceType.PROXY_WEB.getServiceName(),
-        NetworkAddressUtils.getBindAddress(ServiceType.PROXY_WEB, Configuration.global()),
-        this);
-    // reset proxy web port
-    Configuration.set(PropertyKey.PROXY_WEB_PORT,
-        mWebServer.getLocalPort());
-    mWebServer.start();
+//    mWebServer = new ProxyWebServer(ServiceType.PROXY_WEB.getServiceName(),
+//        NetworkAddressUtils.getBindAddress(ServiceType.PROXY_WEB, Configuration.global()),
+//        this);
+//    // reset proxy web port
+//    Configuration.set(PropertyKey.PROXY_WEB_PORT,
+//        mWebServer.getLocalPort());
+//    mWebServer.start();
     mLatch.await();
   }
 
@@ -97,35 +97,36 @@ public final class AlluxioProxyProcess implements ProxyProcess {
 
   @Override
   public boolean waitForReady(int timeoutMs) {
-    try {
-      CommonUtils.waitFor(this + " to start", () -> {
-        if (mWebServer == null || !mWebServer.getServer().isRunning()) {
-          return false;
-        }
-        HttpClient client = HttpClientBuilder.create().build();
-        HttpPost method = new HttpPost(String
-            .format("http://%s:%d%s/%s/%s/%s", mWebServer.getBindHost(), mWebServer.getLocalPort(),
-                Constants.REST_API_PREFIX, PathsRestServiceHandler.SERVICE_PREFIX, "%2f",
-                PathsRestServiceHandler.EXISTS));
-        try {
-          HttpResponse response = client.execute(method);
-          if (response.getStatusLine().getStatusCode() == HttpStatus.SC_OK) {
-            return true;
-          }
-          LOG.debug(IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8));
-          return false;
-        } catch (IOException e) {
-          LOG.debug("Exception: ", e);
-          return false;
-        }
-      }, WaitForOptions.defaults().setTimeoutMs(timeoutMs));
-      return true;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return false;
-    } catch (TimeoutException e) {
-      return false;
-    }
+    return true;
+//    try {
+//      CommonUtils.waitFor(this + " to start", () -> {
+//        if (mWebServer == null || !mWebServer.getServer().isRunning()) {
+//          return false;
+//        }
+//        HttpClient client = HttpClientBuilder.create().build();
+//        HttpPost method = new HttpPost(String
+//            .format("http://%s:%d%s/%s/%s/%s", mWebServer.getBindHost(), mWebServer.getLocalPort(),
+//                Constants.REST_API_PREFIX, PathsRestServiceHandler.SERVICE_PREFIX, "%2f",
+//                PathsRestServiceHandler.EXISTS));
+//        try {
+//          HttpResponse response = client.execute(method);
+//          if (response.getStatusLine().getStatusCode() == HttpStatus.SC_OK) {
+//            return true;
+//          }
+//          LOG.debug(IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8));
+//          return false;
+//        } catch (IOException e) {
+//          LOG.debug("Exception: ", e);
+//          return false;
+//        }
+//      }, WaitForOptions.defaults().setTimeoutMs(timeoutMs));
+//      return true;
+//    } catch (InterruptedException e) {
+//      Thread.currentThread().interrupt();
+//      return false;
+//    } catch (TimeoutException e) {
+//      return false;
+//    }
   }
 
   @Override
