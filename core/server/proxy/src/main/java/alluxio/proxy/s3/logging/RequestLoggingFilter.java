@@ -26,9 +26,6 @@ import javax.ws.rs.ext.Provider;
 /**
  * Helper class for adding logs to request methods for debugging purposes.
  */
-@Logged
-@PreMatching
-@Provider
 public class RequestLoggingFilter implements ContainerRequestFilter {
   private static final Logger LOG = LoggerFactory.getLogger(RequestLoggingFilter.class);
 

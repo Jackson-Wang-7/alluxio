@@ -38,6 +38,9 @@ import alluxio.master.audit.AsyncUserAccessAuditLogWriter;
 import alluxio.proto.journal.File;
 import alluxio.util.CommonUtils;
 import alluxio.web.ProxyWebServer;
+import alluxio.wire.BlockInfo;
+import alluxio.wire.BlockLocation;
+import alluxio.wire.WorkerNetAddress;
 
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import com.google.common.base.Preconditions;
@@ -55,6 +58,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
@@ -1232,35 +1236,52 @@ public final class S3RestServiceHandler {
           createAuditContext("getObject", user, bucket, object)) {
         try {
           URIStatus status = userFs.getStatus(objectUri);
-          FileInStream is = userFs.openFile(objectUri);
-          S3RangeSpec s3Range = S3RangeSpec.Factory.create(range);
-          RangeFileInStream ris = RangeFileInStream.Factory.create(is, status.getLength(), s3Range);
-
-          Response.ResponseBuilder res = Response.ok(ris)
-              .lastModified(new Date(status.getLastModificationTimeMs()))
-              .header(S3Constants.S3_CONTENT_LENGTH_HEADER, s3Range.getLength(status.getLength()));
-
-          // Check for the object's ETag
-          String entityTag = S3RestUtils.getEntityTag(status);
-          if (entityTag != null) {
-            res.header(S3Constants.S3_ETAG_HEADER, entityTag);
-          } else {
-            LOG.debug("Failed to find ETag for object: " + objectPath);
-          }
-
-          // Check if the object had a specified "Content-Type"
-          res.type(S3RestUtils.deserializeContentType(status.getXAttr()));
-
-          // Check if object had tags, if so we need to return the count
-          // in the header "x-amz-tagging-count"
-          TaggingData tagData = S3RestUtils.deserializeTags(status.getXAttr());
-          if (tagData != null) {
-            int taggingCount = tagData.getTagMap().size();
-            if (taggingCount > 0) {
-              res.header(S3Constants.S3_TAGGING_COUNT_HEADER, taggingCount);
-            }
-          }
-          return res.build();
+          BlockInfo blockInfo = status.getBlockInfo(status.getBlockIds().get(0));
+          List<BlockLocation> locations = blockInfo.getLocations();
+          WorkerNetAddress workerNetAddress = locations.get(0).getWorkerAddress();
+          final URI uri = new URI("http", null, workerNetAddress.getHost(), 30000, "/api/v1/worker/openfile",
+              "path=" + objectPath, null);
+//          if (!noredirectParam.getValue()) {
+          return Response.temporaryRedirect(uri)
+              .type(MediaType.APPLICATION_OCTET_STREAM).build();
+//          } else {
+//            ObjectMapper mapper = new ObjectMapper();
+//            Map<String, Object> m = new TreeMap<String, Object>();
+//            m.put("Location", uri);
+//            String js = mapper.writeValueAsString(m);
+//            return Response.ok(js).type(MediaType.APPLICATION_JSON).build();
+//          }
+//          FileInStream is = userFs.openFile(objectUri);
+//          S3RangeSpec s3Range = S3RangeSpec.Factory.create(range);
+//          RangeFileInStream ris = RangeFileInStream.Factory.
+//          create(is, status.getLength(), s3Range);
+//
+//          Response.ResponseBuilder res = Response.ok(ris)
+//              .lastModified(new Date(status.getLastModificationTimeMs()))
+//              .header(S3Constants.S3_CONTENT_LENGTH_HEADER,
+//              s3Range.getLength(status.getLength()));
+//
+//          // Check for the object's ETag
+//          String entityTag = S3RestUtils.getEntityTag(status);
+//          if (entityTag != null) {
+//            res.header(S3Constants.S3_ETAG_HEADER, entityTag);
+//          } else {
+//            LOG.debug("Failed to find ETag for object: " + objectPath);
+//          }
+//
+//          // Check if the object had a specified "Content-Type"
+//          res.type(S3RestUtils.deserializeContentType(status.getXAttr()));
+//
+//          // Check if object had tags, if so we need to return the count
+//          // in the header "x-amz-tagging-count"
+//          TaggingData tagData = S3RestUtils.deserializeTags(status.getXAttr());
+//          if (tagData != null) {
+//            int taggingCount = tagData.getTagMap().size();
+//            if (taggingCount > 0) {
+//              res.header(S3Constants.S3_TAGGING_COUNT_HEADER, taggingCount);
+//            }
+//          }
+//          return res.build();
         } catch (Exception e) {
           throw S3RestUtils.toObjectS3Exception(e, objectPath, auditContext);
         }

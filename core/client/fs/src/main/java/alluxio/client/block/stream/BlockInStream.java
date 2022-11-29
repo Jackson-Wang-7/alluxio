@@ -310,7 +310,6 @@ public class BlockInStream extends InputStream implements BoundedStream, Seekabl
         PreconditionMessage.ERR_BUFFER_STATE.toString(), byteBuffer.capacity(), off, len);
     checkIfClosed();
     if (len == 0) {
-
       return 0;
     }
     if (mPos == mLength) {

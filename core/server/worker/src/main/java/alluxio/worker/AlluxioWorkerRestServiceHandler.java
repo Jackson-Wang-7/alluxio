@@ -15,6 +15,7 @@ import alluxio.AlluxioURI;
 import alluxio.Constants;
 import alluxio.RestUtils;
 import alluxio.RuntimeConstants;
+import alluxio.client.block.stream.BlockDemoStream;
 import alluxio.client.file.FileSystem;
 import alluxio.client.file.URIStatus;
 import alluxio.collections.Pair;
@@ -51,6 +52,7 @@ import alluxio.wire.WorkerWebUIOverview;
 import alluxio.worker.block.BlockStoreMeta;
 import alluxio.worker.block.BlockWorker;
 import alluxio.worker.block.DefaultBlockWorker;
+import alluxio.worker.block.meta.BlockMeta;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -70,12 +72,14 @@ import java.io.FileInputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -240,6 +244,48 @@ public final class AlluxioWorkerRestServiceHandler {
 
       return response;
     }, Configuration.global());
+  }
+
+  /**
+   * read file from worker.
+   * @param requestPath
+   * @return the response object
+   */
+  @GET
+  @Path("openfile")
+  @Produces({MediaType.APPLICATION_OCTET_STREAM,
+      MediaType.APPLICATION_XML, MediaType.WILDCARD})
+  public Response getFile(@QueryParam("path") String requestPath) {
+    return RestUtils.call(() -> {
+      URIStatus status = mFsClient.getStatus(new AlluxioURI(requestPath));
+      long blockId = status.getBlockIds().get(0);
+      Optional<BlockMeta> meta = mBlockWorker.getBlockStore().getVolatileBlockMeta(blockId);
+      if (!meta.isPresent()) {
+        throw new IOException();
+      }
+      String fileLocalPath = meta.get().getPath();
+      BlockDemoStream stream =
+          new BlockDemoStream(fileLocalPath, blockId, meta.get().getBlockSize());
+      Response.ResponseBuilder res = Response.ok(stream);
+      res.type(deserializeContentType(status.getXAttr()));
+      return res.build();
+    }, Configuration.global());
+  }
+
+  private static MediaType deserializeContentType(Map<String, byte[]> xAttr) {
+    MediaType type = MediaType.APPLICATION_OCTET_STREAM_TYPE;
+    // Fetch the Content-Type from the Inode xAttr
+    if (xAttr == null) {
+      return type;
+    }
+    if (xAttr.containsKey("s3_content_type")) {
+      String contentType = new String(xAttr.get(
+          "s3_content_type"), StandardCharsets.UTF_8);
+      if (!contentType.isEmpty()) {
+        type = MediaType.valueOf(contentType);
+      }
+    }
+    return type;
   }
 
   /**

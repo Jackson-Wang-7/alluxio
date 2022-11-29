@@ -104,6 +104,9 @@ public final class RestUtils {
     if (object instanceof Void) {
       return Response.ok().build();
     }
+    if (object instanceof Response) {
+      return (Response) object;
+    }
     if (object instanceof String) {
       // Need to explicitly encode the string as JSON because Jackson will not do it automatically.
       ObjectMapper mapper = new ObjectMapper();

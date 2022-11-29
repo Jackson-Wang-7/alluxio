@@ -20,7 +20,6 @@ import alluxio.master.audit.AsyncUserAccessAuditLogWriter;
 import alluxio.metrics.MetricKey;
 import alluxio.metrics.MetricsSystem;
 import alluxio.proxy.ProxyProcess;
-import alluxio.proxy.s3.CompleteMultipartUploadHandler;
 import alluxio.proxy.s3.S3RestExceptionMapper;
 import alluxio.util.io.PathUtils;
 
@@ -31,15 +30,12 @@ import org.glassfish.jersey.servlet.ServletContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -72,8 +68,7 @@ public final class ProxyWebServer extends WebServer {
     super(serviceName, address);
 
     // REST configuration
-    ResourceConfig config = new ResourceConfig().packages("alluxio.proxy", "alluxio.proxy.s3",
-            "alluxio.proxy.s3.logging")
+    ResourceConfig config = new ResourceConfig().packages("alluxio.proxy", "alluxio.proxy.s3")
         .register(JacksonProtobufObjectMapperProvider.class)
         .register(S3RestExceptionMapper.class);
 
@@ -101,24 +96,11 @@ public final class ProxyWebServer extends WebServer {
                 new StreamCache(Configuration.getMs(PropertyKey.PROXY_STREAM_CACHE_TIMEOUT_MS)));
         getServletContext().setAttribute(ALLUXIO_PROXY_AUDIT_LOG_WRITER_KEY, mAsyncAuditLogWriter);
       }
-
-      @Override
-      public void service(final ServletRequest req, final ServletResponse res)
-              throws ServletException, IOException {
-        Stopwatch stopWatch = Stopwatch.createStarted();
-        super.service(req, res);
-        if ((req instanceof HttpServletRequest) && (res instanceof HttpServletResponse)) {
-          HttpServletRequest httpReq = (HttpServletRequest) req;
-          HttpServletResponse httpRes = (HttpServletResponse) res;
-          logAccess(httpReq, httpRes, stopWatch);
-        }
-      }
     };
     ServletHolder servletHolder = new ServletHolder("Alluxio Proxy Web Service", servlet);
     mServletContextHandler
         .addServlet(servletHolder, PathUtils.concatPath(Constants.REST_API_PREFIX, "*"));
-    // TODO(czhu): Move S3 API logging out of CompleteMultipartUploadHandler into a logging handler
-    addHandler(new CompleteMultipartUploadHandler(mFileSystem, Constants.REST_API_PREFIX));
+//    addHandler(new CompleteMultipartUploadHandler(mFileSystem, Constants.REST_API_PREFIX));
   }
 
   @Override
