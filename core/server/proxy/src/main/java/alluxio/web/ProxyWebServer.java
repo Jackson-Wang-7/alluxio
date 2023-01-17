@@ -14,6 +14,7 @@ package alluxio.web;
 import alluxio.Constants;
 import alluxio.StreamCache;
 import alluxio.client.file.FileSystem;
+import alluxio.client.file.FileSystemContext;
 import alluxio.conf.Configuration;
 import alluxio.conf.PropertyKey;
 import alluxio.master.audit.AsyncUserAccessAuditLogWriter;
@@ -46,12 +47,14 @@ import javax.servlet.http.HttpServletResponse;
 public final class ProxyWebServer extends WebServer {
   private static final Logger LOG = LoggerFactory.getLogger(ProxyWebServer.class);
   public static final String ALLUXIO_PROXY_SERVLET_RESOURCE_KEY = "Alluxio Proxy";
+  public static final String FILE_SYSTEM_CONTEXT_SERVLET_RESOURCE_KEY = "File System Context";
   public static final String FILE_SYSTEM_SERVLET_RESOURCE_KEY = "File System";
   public static final String STREAM_CACHE_SERVLET_RESOURCE_KEY = "Stream Cache";
 
   public static final String SERVER_CONFIGURATION_RESOURCE_KEY = "Server Configuration";
   public static final String ALLUXIO_PROXY_AUDIT_LOG_WRITER_KEY = "Alluxio Proxy Audit Log Writer";
 
+  private final FileSystemContext mFsContext;
   private final FileSystem mFileSystem;
 
   private AsyncUserAccessAuditLogWriter mAsyncAuditLogWriter;
@@ -72,7 +75,8 @@ public final class ProxyWebServer extends WebServer {
         .register(JacksonProtobufObjectMapperProvider.class)
         .register(S3RestExceptionMapper.class);
 
-    mFileSystem = FileSystem.Factory.create(Configuration.global());
+    mFsContext = FileSystemContext.create(Configuration.global());
+    mFileSystem = FileSystem.Factory.create(mFsContext);
 
     if (Configuration.getBoolean(PropertyKey.PROXY_AUDIT_LOGGING_ENABLED)) {
       mAsyncAuditLogWriter = new AsyncUserAccessAuditLogWriter("PROXY_AUDIT_LOG");
@@ -90,8 +94,8 @@ public final class ProxyWebServer extends WebServer {
       public void init() throws ServletException {
         super.init();
         getServletContext().setAttribute(ALLUXIO_PROXY_SERVLET_RESOURCE_KEY, proxyProcess);
-        getServletContext()
-                .setAttribute(FILE_SYSTEM_SERVLET_RESOURCE_KEY, mFileSystem);
+        getServletContext().setAttribute(FILE_SYSTEM_CONTEXT_SERVLET_RESOURCE_KEY, mFsContext);
+        getServletContext().setAttribute(FILE_SYSTEM_SERVLET_RESOURCE_KEY, mFileSystem);
         getServletContext().setAttribute(STREAM_CACHE_SERVLET_RESOURCE_KEY,
                 new StreamCache(Configuration.getMs(PropertyKey.PROXY_STREAM_CACHE_TIMEOUT_MS)));
         getServletContext().setAttribute(ALLUXIO_PROXY_AUDIT_LOG_WRITER_KEY, mAsyncAuditLogWriter);

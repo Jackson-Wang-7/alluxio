@@ -13,6 +13,8 @@ package alluxio.proxy.s3;
 
 import static org.junit.Assert.assertEquals;
 
+import alluxio.S3RangeSpec;
+
 import org.junit.Test;
 
 public final class S3RangeSpecTest {

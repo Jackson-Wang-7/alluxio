@@ -13,9 +13,15 @@ package alluxio.proxy.s3;
 
 import alluxio.AlluxioURI;
 import alluxio.Constants;
+import alluxio.S3RangeSpec;
+import alluxio.client.UnderStorageType;
+import alluxio.client.WriteType;
+import alluxio.client.block.policy.BlockLocationPolicy;
+import alluxio.client.block.policy.options.GetWorkerOptions;
 import alluxio.client.file.FileInStream;
 import alluxio.client.file.FileOutStream;
 import alluxio.client.file.FileSystem;
+import alluxio.client.file.FileSystemContext;
 import alluxio.client.file.URIStatus;
 import alluxio.conf.Configuration;
 import alluxio.conf.InstancedConfiguration;
@@ -26,11 +32,13 @@ import alluxio.exception.DirectoryNotEmptyException;
 import alluxio.exception.FileAlreadyExistsException;
 import alluxio.exception.FileDoesNotExistException;
 import alluxio.exception.InvalidPathException;
+import alluxio.exception.PreconditionMessage;
 import alluxio.grpc.Bits;
 import alluxio.grpc.CreateDirectoryPOptions;
 import alluxio.grpc.CreateFilePOptions;
 import alluxio.grpc.DeletePOptions;
 import alluxio.grpc.ListStatusPOptions;
+import alluxio.grpc.OpenFilePOptions;
 import alluxio.grpc.PMode;
 import alluxio.grpc.SetAttributePOptions;
 import alluxio.grpc.XAttrPropagationStrategy;
@@ -39,7 +47,7 @@ import alluxio.proto.journal.File;
 import alluxio.util.CommonUtils;
 import alluxio.web.ProxyWebServer;
 import alluxio.wire.BlockInfo;
-import alluxio.wire.BlockLocation;
+import alluxio.wire.BlockLocationInfo;
 import alluxio.wire.WorkerNetAddress;
 
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
@@ -68,6 +76,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -111,6 +120,7 @@ public final class S3RestServiceHandler {
   public static final String OBJECT_PARAM = "{bucket}/{object:.+}";
 
   private final FileSystem mMetaFS;
+  private final FileSystemContext mContext;
   private final InstancedConfiguration mSConf;
 
   @Context
@@ -138,6 +148,8 @@ public final class S3RestServiceHandler {
       throws IOException, AlluxioException {
     mMetaFS =
         (FileSystem) context.getAttribute(ProxyWebServer.FILE_SYSTEM_SERVLET_RESOURCE_KEY);
+    mContext = (FileSystemContext) context.getAttribute(
+        ProxyWebServer.FILE_SYSTEM_CONTEXT_SERVLET_RESOURCE_KEY);
     mSConf = (InstancedConfiguration) mMetaFS.getConf();
     mAsyncAuditLogWriter = (AsyncUserAccessAuditLogWriter) context.getAttribute(
         ProxyWebServer.ALLUXIO_PROXY_AUDIT_LOG_WRITER_KEY);
@@ -820,58 +832,68 @@ public final class S3RestServiceHandler {
         // not copying from an existing file
         if (copySourceParam == null) {
           try {
-            MessageDigest md5 = MessageDigest.getInstance("MD5");
+//            MessageDigest md5 = MessageDigest.getInstance("MD5");
 
-            // The request body can be in the aws-chunked encoding format, or not encoded at all
-            // determine if it's encoded, and then which parts of the stream to read depending on
-            // the encoding type.
-            boolean isChunkedEncoding = decodedLength != null;
-            long toRead;
-            InputStream readStream = is;
-            if (isChunkedEncoding) {
-              toRead = Long.parseLong(decodedLength);
-              readStream = new ChunkedEncodingInputStream(is);
-            } else {
-              toRead = Long.parseLong(contentLength);
-            }
             try {
               S3RestUtils.deleteExistObject(userFs, objectUri);
             } catch (IOException | AlluxioException e) {
               throw S3RestUtils.toObjectS3Exception(e, objectUri.getPath(), auditContext);
             }
-            FileOutStream os = userFs.createFile(objectUri, filePOptions);
-            try (DigestOutputStream digestOutputStream = new DigestOutputStream(os, md5)) {
-              long read = ByteStreams.copy(ByteStreams.limit(readStream, toRead),
-                  digestOutputStream);
-              if (read < toRead) {
-                throw new IOException(String.format(
-                    "Failed to read all required bytes from the stream. Read %d/%d",
-                    read, toRead));
-              }
+            UnderStorageType underStorageType =
+                WriteType.fromProto(S3RestUtils.getS3WriteType()).getUnderStorageType();
+            long blockSize = 0;
+            if (!underStorageType.isSyncPersist()) {
+              blockSize = mSConf.getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
             }
-
-            byte[] digest = md5.digest();
-            String base64Digest = BaseEncoding.base64().encode(digest);
-            if (contentMD5 != null && !contentMD5.equals(base64Digest)) {
-              // The object may be corrupted, delete the written object and return an error.
-              try {
-                userFs.delete(objectUri, DeletePOptions.newBuilder().setRecursive(true).build());
-              } catch (Exception e2) {
-                // intend to continue and return BAD_DIGEST S3Exception.
-              }
-              throw new S3Exception(objectUri.getPath(), S3ErrorCode.BAD_DIGEST);
+            Optional<WorkerNetAddress> workerNetAddress = Optional.empty();
+            BlockLocationPolicy writeBlockLocationPolicy = BlockLocationPolicy.Factory.create(
+                mSConf.getClass(PropertyKey.USER_BLOCK_WRITE_LOCATION_POLICY), mSConf);
+            while (!workerNetAddress.isPresent()) {
+              GetWorkerOptions getWorkerOptions = GetWorkerOptions.defaults()
+                  .setBlockWorkerInfos(mContext.getCachedWorkers())
+                  .setBlockInfo(new BlockInfo()
+                      .setBlockId(-1)
+                      .setLength(blockSize));
+              workerNetAddress = writeBlockLocationPolicy.getWorker(getWorkerOptions);
             }
-
-            String entityTag = Hex.encodeHexString(digest);
-            // persist the ETag via xAttr
-            // TODO(czhu): try to compute the ETag prior to creating the file
-            //  to reduce total RPC RTT
-            S3RestUtils.setEntityTag(userFs, objectUri, entityTag);
-            if (partNumber != null) { // UploadPart
-              return Response.ok().header(S3Constants.S3_ETAG_HEADER, entityTag).build();
-            }
-            // PutObject
-            return Response.ok().header(S3Constants.S3_ETAG_HEADER, entityTag).build();
+            final URI uri =
+                new URI("http", null, workerNetAddress.get().getHost(), 30000, objectPath, null,
+                    null);
+            return Response.temporaryRedirect(uri)
+                .type(MediaType.APPLICATION_OCTET_STREAM).build();
+//            FileOutStream os = userFs.createFile(objectUri, filePOptions);
+//            try (DigestOutputStream digestOutputStream = new DigestOutputStream(os, md5)) {
+//              long read = ByteStreams.copy(ByteStreams.limit(readStream, toRead),
+//                  digestOutputStream);
+//              if (read < toRead) {
+//                throw new IOException(String.format(
+//                    "Failed to read all required bytes from the stream. Read %d/%d",
+//                    read, toRead));
+//              }
+//            }
+//
+//            byte[] digest = md5.digest();
+//            String base64Digest = BaseEncoding.base64().encode(digest);
+//            if (contentMD5 != null && !contentMD5.equals(base64Digest)) {
+//              // The object may be corrupted, delete the written object and return an error.
+//              try {
+//                userFs.delete(objectUri, DeletePOptions.newBuilder().setRecursive(true).build());
+//              } catch (Exception e2) {
+//                // intend to continue and return BAD_DIGEST S3Exception.
+//              }
+//              throw new S3Exception(objectUri.getPath(), S3ErrorCode.BAD_DIGEST);
+//            }
+//
+//            String entityTag = Hex.encodeHexString(digest);
+//            // persist the ETag via xAttr
+//            // TODO(czhu): try to compute the ETag prior to creating the file
+//            //  to reduce total RPC RTT
+//            S3RestUtils.setEntityTag(userFs, objectUri, entityTag);
+//            if (partNumber != null) { // UploadPart
+//              return Response.ok().header(S3Constants.S3_ETAG_HEADER, entityTag).build();
+//            }
+//            // PutObject
+//            return Response.ok().header(S3Constants.S3_ETAG_HEADER, entityTag).build();
           } catch (Exception e) {
             throw S3RestUtils.toObjectS3Exception(e, objectPath, auditContext);
           }
@@ -1236,11 +1258,27 @@ public final class S3RestServiceHandler {
           createAuditContext("getObject", user, bucket, object)) {
         try {
           URIStatus status = userFs.getStatus(objectUri);
-          BlockInfo blockInfo = status.getBlockInfo(status.getBlockIds().get(0));
-          List<BlockLocation> locations = blockInfo.getLocations();
-          WorkerNetAddress workerNetAddress = locations.get(0).getWorkerAddress();
-          final URI uri = new URI("http", null, workerNetAddress.getHost(), 30000, "/api/v1/worker/openfile",
-              "path=" + objectPath, null);
+          S3RangeSpec s3Range = S3RangeSpec.Factory.create(range);
+          long offset = s3Range.getOffset(status.getLength());
+          long blockSize = status.getBlockSizeBytes();
+
+          BlockLocationInfo locationInfo =
+              userFs.getBlockLocations(status).get(Math.toIntExact(offset / blockSize));
+          WorkerNetAddress workerNetAddress = locationInfo.getLocations().get(0);
+          final URI uri =
+              new URI("http", null, workerNetAddress.getHost(), 30000, objectPath,
+                  null, null);
+
+//          StringBuilder queryBuilder = new StringBuilder();
+//          queryBuilder.append("path=");
+//          queryBuilder.append(objectPath);
+//          queryBuilder.append("&username=");
+//          queryBuilder.append(user);
+//          queryBuilder.append("&range=");
+//          queryBuilder.append(range);
+//          final URI uri =
+//              new URI("http", null, workerNetAddress.getHost(), 30000, "/api/v1/worker/openfile",
+//                  queryBuilder.toString(), null);
 //          if (!noredirectParam.getValue()) {
           return Response.temporaryRedirect(uri)
               .type(MediaType.APPLICATION_OCTET_STREAM).build();

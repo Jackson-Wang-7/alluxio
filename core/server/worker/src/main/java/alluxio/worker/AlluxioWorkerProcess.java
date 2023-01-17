@@ -26,8 +26,7 @@ import alluxio.util.io.PathUtils;
 import alluxio.util.network.NettyUtils;
 import alluxio.util.network.NetworkAddressUtils;
 import alluxio.util.network.NetworkAddressUtils.ServiceType;
-import alluxio.web.WebServer;
-import alluxio.web.WorkerWebServer;
+import alluxio.web.WorkerNettyWebServer;
 import alluxio.wire.TieredIdentity;
 import alluxio.wire.WorkerNetAddress;
 import alluxio.worker.block.BlockWorker;
@@ -65,8 +64,10 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
   /** The worker registry. */
   private final WorkerRegistry mRegistry;
 
-  /** Worker Web UI server. */
-  private final WebServer mWebServer;
+//  /** Worker Web UI server. */
+//  private final WebServer mWebServer;
+
+  private final WorkerNettyWebServer mNettyServer;
 
   /** Used for auto binding. **/
   private ServerSocket mBindSocket;
@@ -109,10 +110,14 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
           Configuration.getMs(PropertyKey.WORKER_STARTUP_TIMEOUT));
 
       // Setup web server
-      mWebServer =
-          new WorkerWebServer(NetworkAddressUtils.getBindAddress(ServiceType.WORKER_WEB,
-              Configuration.global()), this,
-              mRegistry.get(BlockWorker.class));
+//      mWebServer =
+//          new WorkerWebServer(NetworkAddressUtils.getBindAddress(ServiceType.WORKER_WEB,
+//              Configuration.global()), this,
+//              mRegistry.get(BlockWorker.class));
+
+      mNettyServer =
+          new WorkerNettyWebServer(NetworkAddressUtils.getBindAddress(ServiceType.WORKER_WEB,
+              Configuration.global()), this);
 
       // Random port binding.
       int bindPort;
@@ -185,12 +190,12 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
 
   @Override
   public String getWebBindHost() {
-    return mWebServer.getBindHost();
+    return mNettyServer.getHost();
   }
 
   @Override
   public int getWebLocalPort() {
-    return mWebServer.getLocalPort();
+    return mNettyServer.getLocalPort();
   }
 
   @Override
@@ -221,7 +226,7 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
     startWorkers();
 
     // Start serving the web server, this will not block.
-    mWebServer.start();
+//    mWebServer.start();
 
     // Start monitor jvm
     if (Configuration.getBoolean(PropertyKey.WORKER_JVM_MONITOR_ENABLED)) {
@@ -286,7 +291,7 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
     }
     mUfsManager.close();
     try {
-      mWebServer.stop();
+      mNettyServer.stop();
     } catch (Exception e) {
       LOG.error("Failed to stop {} web server", this, e);
     }
@@ -305,8 +310,8 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
   public boolean waitForReady(int timeoutMs) {
     try {
       CommonUtils.waitFor(this + " to start",
-          () -> isServing() && mRegistry.get(BlockWorker.class).getWorkerId() != null
-              && mWebServer != null && mWebServer.getServer().isRunning(),
+          () -> isServing() && mRegistry.get(BlockWorker.class).getWorkerId() != null,
+//              && mWebServer != null && mWebServer.getServer().isRunning(),
           WaitForOptions.defaults().setTimeoutMs(timeoutMs));
       return true;
     } catch (InterruptedException e) {
@@ -327,7 +332,7 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
         .setRpcPort(mRpcBindAddress.getPort())
         .setDataPort(getDataLocalPort())
         .setDomainSocketPath(getDataDomainSocketPath())
-        .setWebPort(mWebServer.getLocalPort())
+        .setWebPort(mNettyServer.getLocalPort())
         .setTieredIdentity(mTieredIdentitiy);
   }
 

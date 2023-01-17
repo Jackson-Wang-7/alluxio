@@ -15,7 +15,8 @@ import alluxio.AlluxioURI;
 import alluxio.Constants;
 import alluxio.RestUtils;
 import alluxio.RuntimeConstants;
-import alluxio.client.block.stream.BlockDemoStream;
+import alluxio.S3RangeSpec;
+import alluxio.client.file.FileInStream;
 import alluxio.client.file.FileSystem;
 import alluxio.client.file.URIStatus;
 import alluxio.collections.Pair;
@@ -27,9 +28,11 @@ import alluxio.exception.FileDoesNotExistException;
 import alluxio.exception.runtime.AlluxioRuntimeException;
 import alluxio.grpc.ConfigProperty;
 import alluxio.grpc.GetConfigurationPOptions;
+import alluxio.grpc.OpenFilePOptions;
 import alluxio.master.block.BlockId;
 import alluxio.metrics.MetricKey;
 import alluxio.metrics.MetricsSystem;
+import alluxio.security.User;
 import alluxio.util.ConfigurationUtils;
 import alluxio.util.FormatUtils;
 import alluxio.util.LogUtils;
@@ -52,7 +55,6 @@ import alluxio.wire.WorkerWebUIOverview;
 import alluxio.worker.block.BlockStoreMeta;
 import alluxio.worker.block.BlockWorker;
 import alluxio.worker.block.DefaultBlockWorker;
-import alluxio.worker.block.meta.BlockMeta;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -76,15 +78,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import javax.annotation.concurrent.NotThreadSafe;
+import javax.security.auth.Subject;
 import javax.servlet.ServletContext;
 import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
@@ -245,30 +248,127 @@ public final class AlluxioWorkerRestServiceHandler {
       return response;
     }, Configuration.global());
   }
+//
+//  /**
+//   * read file from worker.
+//   * @param requestPath
+//   * @param user
+//   * @param is
+//   * @return the response object
+//   */
+//  @PUT
+//  @Path("createFile")
+//  @Consumes(MediaType.WILDCARD)
+//  public Response createFile(@QueryParam("path") String requestPath,
+//                             @QueryParam("username") String user,
+//                             final InputStream is) {
+//
+//    return RestUtils.call(() -> {
+//      CreateFilePOptions filePOptions =
+//          CreateFilePOptions.newBuilder()
+//              .setRecursive(true)
+//              .setMode(PMode.newBuilder()
+//                  .setOwnerBits(Bits.ALL)
+//                  .setGroupBits(Bits.ALL)
+//                  .setOtherBits(Bits.NONE).build())
+//              .setWriteType(S3RestUtils.getS3WriteType())
+//              .putAllXattr(xattrMap).setXattrPropStrat(XAttrPropagationStrategy.LEAF_NODE)
+//              .build();
+//
+//      InputStream readStream = is;
+//      FileSystem userFs = createFileSystemForUser(user, mFsClient);
+//      FileOutStream os = userFs.createFile(requestPath, filePOptions);
+//      try (DigestOutputStream digestOutputStream = new DigestOutputStream(os, md5)) {
+//        long read = ByteStreams.copy(ByteStreams.limit(readStream, toRead),
+//            digestOutputStream);
+//        if (read < toRead) {
+//          throw new IOException(String.format(
+//              "Failed to read all required bytes from the stream. Read %d/%d",
+//              read, toRead));
+//        }
+//      }
+//
+//      byte[] digest = md5.digest();
+//      String base64Digest = BaseEncoding.base64().encode(digest);
+//      if (contentMD5 != null && !contentMD5.equals(base64Digest)) {
+//        // The object may be corrupted, delete the written object and return an error.
+//        try {
+//          userFs.delete(objectUri, DeletePOptions.newBuilder().setRecursive(true).build());
+//        } catch (Exception e2) {
+//          // intend to continue and return BAD_DIGEST S3Exception.
+//        }
+//        throw new S3Exception(objectUri.getPath(), S3ErrorCode.BAD_DIGEST);
+//      }
+//
+//      String entityTag = Hex.encodeHexString(digest);
+//      // persist the ETag via xAttr
+//      // TODO(czhu): try to compute the ETag prior to creating the file
+//      //  to reduce total RPC RTT
+//      S3RestUtils.setEntityTag(userFs, objectUri, entityTag);
+//      // PutObject
+//      return Response.ok().header(S3Constants.S3_ETAG_HEADER, entityTag).build();
+//    }, Configuration.global());
+//  }
 
   /**
    * read file from worker.
    * @param requestPath
+   * @param user
+   * @param range
    * @return the response object
    */
   @GET
   @Path("openfile")
   @Produces({MediaType.APPLICATION_OCTET_STREAM,
       MediaType.APPLICATION_XML, MediaType.WILDCARD})
-  public Response getFile(@QueryParam("path") String requestPath) {
+  public Response getFile(@QueryParam("path") String requestPath,
+                          @QueryParam("username") String user,
+                          @QueryParam("range") String range) {
     return RestUtils.call(() -> {
-      URIStatus status = mFsClient.getStatus(new AlluxioURI(requestPath));
-      long blockId = status.getBlockIds().get(0);
-      Optional<BlockMeta> meta = mBlockWorker.getBlockStore().getVolatileBlockMeta(blockId);
-      if (!meta.isPresent()) {
-        throw new IOException();
-      }
-      String fileLocalPath = meta.get().getPath();
-      BlockDemoStream stream =
-          new BlockDemoStream(fileLocalPath, blockId, meta.get().getBlockSize());
-      Response.ResponseBuilder res = Response.ok(stream);
+      FileSystem userFs = createFileSystemForUser(user, mFsClient);
+      URIStatus status = userFs.getStatus(new AlluxioURI(requestPath));
+      FileInStream is = userFs.openFile(status, OpenFilePOptions.getDefaultInstance());
+      S3RangeSpec s3Range = S3RangeSpec.Factory.create(range);
+      RangeFileInStream ris = RangeFileInStream.Factory.create(is, status.getLength(), s3Range);
+
+      Response.ResponseBuilder res = Response.ok(ris)
+          .lastModified(new Date(status.getLastModificationTimeMs()))
+          .header("Content-Length",
+              s3Range.getLength(status.getLength()));
+
+      // Check for the object's ETag
+//      String entityTag = S3RestUtils.getEntityTag(status);
+//      if (entityTag != null) {
+//        res.header(S3Constants.S3_ETAG_HEADER, entityTag);
+//      } else {
+//        LOG.debug("Failed to find ETag for object: " + objectPath);
+//      }
+
+      // Check if the object had a specified "Content-Type"
       res.type(deserializeContentType(status.getXAttr()));
+
+      // Check if object had tags, if so we need to return the count
+      // in the header "x-amz-tagging-count"
+//      TaggingData tagData = S3RestUtils.deserializeTags(status.getXAttr());
+//      if (tagData != null) {
+//        int taggingCount = tagData.getTagMap().size();
+//        if (taggingCount > 0) {
+//          res.header(S3Constants.S3_TAGGING_COUNT_HEADER, taggingCount);
+//        }
+//      }
       return res.build();
+
+//      long blockId = status.getBlockIds().get(0);
+//      Optional<BlockMeta> meta = mBlockWorker.getBlockStore().getVolatileBlockMeta(blockId);
+//      if (!meta.isPresent()) {
+//        throw new IOException();
+//      }
+//      String fileLocalPath = meta.get().getPath();
+//      BlockDemoStream stream =
+//          new BlockDemoStream(fileLocalPath, blockId, meta.get().getBlockSize());
+//      Response.ResponseBuilder res = Response.ok(stream);
+//      res.type(deserializeContentType(status.getXAttr()));
+//      return res.build();
     }, Configuration.global());
   }
 
@@ -670,5 +770,22 @@ public final class AlluxioWorkerRestServiceHandler {
   public Response logLevel(@QueryParam(LOG_ARGUMENT_NAME) final String logName,
       @QueryParam(LOG_ARGUMENT_LEVEL) final String level) {
     return RestUtils.call(() -> LogUtils.setLogLevel(logName, level), Configuration.global());
+  }
+
+  /**
+   * @param user the {@link Subject} name of the filesystem user
+   * @param fs the source {@link FileSystem} to base off of
+   * @return A {@link FileSystem} with the subject set to the provided user
+   */
+  public static FileSystem createFileSystemForUser(
+      String user, FileSystem fs) {
+    if (user == null) {
+      // Used to return the top-level FileSystem view when not using Authentication
+      return fs;
+    }
+
+    final Subject subject = new Subject();
+    subject.getPrincipals().add(new User(user));
+    return FileSystem.Factory.get(subject, fs.getConf());
   }
 }
