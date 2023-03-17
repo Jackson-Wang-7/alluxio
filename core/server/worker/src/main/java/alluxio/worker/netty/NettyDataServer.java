@@ -11,6 +11,7 @@
 
 package alluxio.worker.netty;
 
+import alluxio.client.file.FileSystem;
 import alluxio.conf.Configuration;
 import alluxio.conf.PropertyKey;
 import alluxio.network.ChannelType;
@@ -59,6 +60,7 @@ public final class NettyDataServer implements DataServer {
    */
   public NettyDataServer(final SocketAddress address, final WorkerProcess workerProcess) {
     mSocketAddress = address;
+//    FileSystem fileSystem = FileSystem.Factory.create();
     mBootstrap = createBootstrap().childHandler(new PipelineHandler(workerProcess));
     try {
       mChannelFuture = mBootstrap.bind(address).sync();

@@ -14,6 +14,8 @@ package alluxio.proxy.s3;
 import alluxio.exception.runtime.AlluxioRuntimeException;
 import alluxio.exception.runtime.NotFoundRuntimeException;
 import alluxio.exception.status.AlluxioStatusException;
+import alluxio.s3.S3ErrorCode;
+import alluxio.s3.S3Exception;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;

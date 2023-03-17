@@ -11,6 +11,7 @@
 
 package alluxio.worker.netty;
 
+//import alluxio.client.file.FileSystem;
 import alluxio.conf.Configuration;
 import alluxio.conf.PropertyKey;
 import alluxio.network.netty.FileTransferType;
@@ -25,6 +26,9 @@ import alluxio.worker.dora.DoraWorker;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.timeout.IdleStateHandler;
 
 import java.util.concurrent.TimeUnit;
@@ -34,8 +38,9 @@ import javax.annotation.concurrent.ThreadSafe;
  * Adds the data server's pipeline into the channel.
  */
 @ThreadSafe
-final class PipelineHandler extends ChannelInitializer<Channel> {
+final class PipelineHandler extends ChannelInitializer<SocketChannel> {
   private final WorkerProcess mWorkerProcess;
+//  private final FileSystem mFileSystem;
   private final FileTransferType mFileTransferType;
   private final AsyncCacheRequestManager mRequestManager;
   private static final boolean DORA_WORKER_ENABLED =
@@ -46,6 +51,7 @@ final class PipelineHandler extends ChannelInitializer<Channel> {
    */
   public PipelineHandler(WorkerProcess workerProcess) {
     mWorkerProcess = workerProcess;
+//    mFileSystem = fileSystem;
     mFileTransferType = Configuration
         .getEnum(PropertyKey.WORKER_NETWORK_NETTY_FILE_TRANSFER_TYPE, FileTransferType.class);
     if (DORA_WORKER_ENABLED) {
@@ -58,11 +64,22 @@ final class PipelineHandler extends ChannelInitializer<Channel> {
   }
 
   @Override
-  protected void initChannel(Channel ch) throws Exception {
+  protected void initChannel(SocketChannel ch) throws Exception {
     ChannelPipeline pipeline = ch.pipeline();
 
     final long timeoutMs = Configuration.getMs(PropertyKey.NETWORK_NETTY_HEARTBEAT_TIMEOUT_MS);
 
+//    pipeline.addLast("httpServerCodec", new HttpServerCodec());
+//    pipeline.addLast("httpAggregator", new HttpObjectAggregator(512 * 1024));
+//    if (DORA_WORKER_ENABLED) {
+//      pipeline.addLast(
+//          new S3RestServerHandler(NettyExecutors.BLOCK_READER_EXECUTOR,
+//              mWorkerProcess.getWorker(DoraWorker.class), mFileTransferType));
+//      pipeline.addLast(new S3RestServerHandler());
+//    } else {
+//      pipeline.addLast(
+//          new S3RestServerHandler(mFileSystem, mWorkerProcess.getWorker(BlockWorker.class)));
+//    }
     // Decoders & Encoders
     pipeline.addLast("frameDecoder", RPCMessage.createFrameDecoder());
     pipeline.addLast("RPCMessageDecoder", new RPCMessageDecoder());

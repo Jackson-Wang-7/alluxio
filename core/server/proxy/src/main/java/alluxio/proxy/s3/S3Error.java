@@ -11,6 +11,7 @@
 
 package alluxio.proxy.s3;
 
+import alluxio.s3.S3ErrorCode;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 
